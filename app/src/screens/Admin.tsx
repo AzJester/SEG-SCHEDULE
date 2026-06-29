@@ -4,6 +4,7 @@ import type { Dataset } from '../types'
 import { buildEntities, type EntityConfig } from '../admin/entities'
 import { RecordDrawer, type Rec } from '../components/RecordDrawer'
 import { parseWorkbook } from '../import/workbook'
+import { exportDatasetWorkbook } from '../export/excel'
 
 export function Admin() {
   const { ds, update, resetDemo } = useStore()
@@ -179,6 +180,7 @@ function DataTools() {
           <input type="file" accept=".xlsx" style={{ display: 'none' }} disabled={busy}
             onChange={(e) => { const f = e.target.files?.[0]; if (f) onExcel(f); e.target.value = '' }} />
         </label>
+        <button className="btn sm" onClick={() => exportDatasetWorkbook(ds)}>Export Excel (.xlsx)</button>
         <button className="btn sm" onClick={exportJson}>Export JSON</button>
         <label className="btn sm" style={{ cursor: 'pointer' }}>
           Import JSON
