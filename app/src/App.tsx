@@ -13,7 +13,7 @@ const NAV: Array<{ id: View; label: string; ico: string; title: string; sub: str
   { id: 'schedule', label: 'Schedule', ico: '▦', title: 'Schedule', sub: 'Per-person weekly loading heatmap.' },
   { id: 'reports', label: 'Reports', ico: '📊', title: 'Reports', sub: 'Pivot views — the workbook outputs, filtered together.' },
   { id: 'liability', label: 'Liability', ico: '⚠', title: 'Liability / gap', sub: 'Who is on payroll but not booked to funded work, and when.' },
-  { id: 'admin', label: 'Admin', ico: '⚙', title: 'Reference data', sub: 'Roster, committed scale, programs, holidays.' },
+  { id: 'admin', label: 'Admin', ico: '⚙', title: 'Reference data', sub: 'Add, edit and delete roster, programs, projects, tasks, charge codes, groups, the committed scale and holidays.' },
 ]
 
 function Shell() {
