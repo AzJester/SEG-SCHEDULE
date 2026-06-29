@@ -1,89 +1,156 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useStore } from '../store'
-import type { CommittedTier } from '../types'
+import type { Dataset } from '../types'
+import { buildEntities, type EntityConfig } from '../admin/entities'
+import { RecordDrawer, type Rec } from '../components/RecordDrawer'
 
 export function Admin() {
   const { ds, update, resetDemo } = useStore()
-  const [tab, setTab] = useState<'roster' | 'committed' | 'programs' | 'holidays'>('roster')
+  const entities = useMemo(() => buildEntities(ds), [ds])
+  const [tab, setTab] = useState<string>(entities[0].tab)
+  const [editing, setEditing] = useState<{ rec: Rec; isNew: boolean } | null>(null)
 
-  const setTier = (i: number, patch: Partial<CommittedTier>) =>
-    update({ committedScale: ds.committedScale.map((t, j) => (j === i ? { ...t, ...patch } : t)) })
-
-  const grpName = new Map(ds.groups.map((g) => [g.id, g.name]))
+  const isHolidays = tab === 'Holidays'
+  const cfg = entities.find((e) => e.tab === tab)
 
   return (
     <div className="content">
       <div className="banner">
-        Reference data drives validation and the rollups. The committed scale is editable here
-        (change ③ — final values TBD with Melanie); roster hours are per-person (change ②).
+        Everything here is editable and feeds the rollups and validation. Changes recompute the
+        reports immediately. Roster hours are per-person; the committed scale and groups (incl. the
+        Cluster no-holiday / liability rules) are fully configurable.
       </div>
       <div className="tag-row" style={{ marginBottom: 16 }}>
-        {(['roster', 'committed', 'programs', 'holidays'] as const).map((t) => (
-          <button key={t} className={`btn sm ${t === tab ? 'primary' : ''}`} onClick={() => setTab(t)}>
-            {t === 'roster' ? 'Roster' : t === 'committed' ? 'Committed scale' : t === 'programs' ? 'Programs' : 'Holidays'}
-          </button>
+        {entities.map((e) => (
+          <button key={e.tab} className={`btn sm ${e.tab === tab ? 'primary' : ''}`} onClick={() => setTab(e.tab)}>{e.tab}</button>
         ))}
+        <button className={`btn sm ${isHolidays ? 'primary' : ''}`} onClick={() => setTab('Holidays')}>Holidays</button>
         <button className="btn sm danger" style={{ marginLeft: 'auto' }} onClick={() => { if (confirm('Reset all demo data to seed?')) resetDemo() }}>
           Reset demo data
         </button>
       </div>
 
-      {tab === 'roster' && (
-        <div className="panel"><div className="panel-head"><h2>Roster</h2><span className="hint">{ds.employees.length} people · per-person weekly hours</span></div>
-          <div className="table-scroll"><table>
-            <thead><tr><th>Last name</th><th>Group</th><th className="num">Weekly hrs</th><th>Type</th><th>Employment</th><th>Flag</th></tr></thead>
-            <tbody>{ds.employees.map((e) => (
-              <tr key={e.id}>
-                <td>{e.lastName}</td>
-                <td><span className="pill gray">{grpName.get(e.groupId)}</span></td>
-                <td className="num">{e.weeklyHours}</td>
-                <td>{e.fullTime ? 'Full-time' : 'Part-time'}</td>
-                <td className="muted">{e.employmentStart} → {e.employmentEnd ?? 'present'}</td>
-                <td>{e.isPlaceholder ? <span className="pill warn">Unavailable</span> : grpName.get(e.groupId) === 'Cluster' ? <span className="pill accent">Compute</span> : ''}</td>
-              </tr>
-            ))}</tbody>
-          </table></div>
-        </div>
-      )}
+      {isHolidays ? (
+        <HolidaysEditor ds={ds} update={update} />
+      ) : cfg ? (
+        <EntityTable
+          cfg={cfg}
+          ds={ds}
+          onAdd={() => setEditing({ rec: cfg.makeNew(), isNew: true })}
+          onEdit={(rec) => setEditing({ rec: { ...rec }, isNew: false })}
+        />
+      ) : null}
 
-      {tab === 'committed' && (
-        <div className="panel"><div className="panel-head"><h2>Committed scale</h2><span className="hint">Edit labels and which tiers count as "committed"</span></div>
-          <div className="table-scroll"><table>
-            <thead><tr><th>Code</th><th>Label</th><th>Counts as committed?</th></tr></thead>
-            <tbody>{ds.committedScale.map((t, i) => (
-              <tr key={t.code}>
-                <td><code className="inline">{t.code}</code></td>
-                <td><input type="text" style={{ width: '100%' }} value={t.label} onChange={(e) => setTier(i, { label: e.target.value })} /></td>
-                <td><input type="checkbox" checked={t.committed} onChange={(e) => setTier(i, { committed: e.target.checked })} /></td>
-              </tr>
-            ))}</tbody>
-          </table></div>
-        </div>
+      {editing && cfg && !isHolidays && (
+        <RecordDrawer
+          title={`${editing.isNew ? 'New' : 'Edit'} ${cfg.singular.toLowerCase()}`}
+          fields={cfg.fields}
+          initial={editing.rec}
+          isNew={editing.isNew}
+          onClose={() => setEditing(null)}
+          extraValidate={(rec) => {
+            // Block an identity that collides with a different existing record.
+            const list = ds[cfg.key] as unknown as Rec[]
+            const origId = editing.rec[cfg.idKey]
+            const newIdv = rec[cfg.idKey]
+            const clash = list.some((x) => x[cfg.idKey] === newIdv && x[cfg.idKey] !== origId)
+            return clash ? [`${cfg.idKey} "${String(newIdv)}" already exists.`] : []
+          }}
+          onSave={(rec) => {
+            const list = ds[cfg.key] as unknown as Rec[]
+            const origId = editing.rec[cfg.idKey]
+            const exists = list.some((x) => x[cfg.idKey] === origId)
+            const next = exists ? list.map((x) => (x[cfg.idKey] === origId ? rec : x)) : [...list, rec]
+            update({ [cfg.key]: next } as unknown as Partial<Dataset>)
+            setEditing(null)
+          }}
+          onDelete={() => {
+            const reason = cfg.deleteGuard(String(editing.rec[cfg.idKey]))
+            if (reason) { alert(`Cannot delete: ${reason}`); return }
+            const list = ds[cfg.key] as unknown as Rec[]
+            update({ [cfg.key]: list.filter((x) => x[cfg.idKey] !== editing.rec[cfg.idKey]) } as unknown as Partial<Dataset>)
+            setEditing(null)
+          }}
+        />
       )}
+    </div>
+  )
+}
 
-      {tab === 'programs' && (
-        <div className="panel"><div className="panel-head"><h2>Programs</h2><span className="hint">{ds.programs.length} programs</span></div>
-          <div className="table-scroll"><table>
-            <thead><tr><th>Program</th><th>PM</th><th>Contract</th><th className="num">Projects</th><th className="num">Charge codes</th></tr></thead>
-            <tbody>{ds.programs.map((p) => (
-              <tr key={p.id}>
-                <td>{p.name}</td><td>{p.pm}</td><td><span className="pill gray">{p.contractType}</span></td>
-                <td className="num">{ds.projects.filter((x) => x.programId === p.id).length}</td>
-                <td className="num">{ds.chargeCodes.filter((x) => x.programId === p.id).length}</td>
+function EntityTable({
+  cfg, ds, onAdd, onEdit,
+}: {
+  cfg: EntityConfig
+  ds: Dataset
+  onAdd: () => void
+  onEdit: (rec: Rec) => void
+}) {
+  const rows = ds[cfg.key] as unknown as Rec[]
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h2>{cfg.tab}</h2>
+        <span className="hint">{rows.length} record(s)</span>
+        <div className="right">
+          <button className="btn primary sm" onClick={onAdd}>+ New {cfg.singular.toLowerCase()}</button>
+        </div>
+      </div>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              {cfg.columns.map((c) => <th key={c.label} className={c.num ? 'num' : ''}>{c.label}</th>)}
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={String(r[cfg.idKey]) || i}>
+                {cfg.columns.map((c) => <td key={c.label} className={c.num ? 'num' : ''}>{c.render(r)}</td>)}
+                <td><button className="btn ghost sm" onClick={() => onEdit(r)}>Edit</button></td>
               </tr>
-            ))}</tbody>
-          </table></div>
-        </div>
-      )}
+            ))}
+            {rows.length === 0 && <tr><td colSpan={cfg.columns.length + 1} className="empty">No records yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
 
-      {tab === 'holidays' && (
-        <div className="panel"><div className="panel-head"><h2>Holiday calendar</h2><span className="hint">Subtracted from working days (Cluster ignores these)</span></div>
-          <div className="table-scroll"><table>
-            <thead><tr><th>Date</th></tr></thead>
-            <tbody>{ds.holidays.map((h) => <tr key={h}><td>{h}</td></tr>)}</tbody>
-          </table></div>
+function HolidaysEditor({ ds, update }: { ds: Dataset; update: (p: Partial<Dataset>) => void }) {
+  const [date, setDate] = useState('')
+  const add = () => {
+    if (!date || ds.holidays.includes(date)) return
+    update({ holidays: [...ds.holidays, date].sort() })
+    setDate('')
+  }
+  const remove = (h: string) => update({ holidays: ds.holidays.filter((x) => x !== h) })
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h2>Holiday calendar</h2>
+        <span className="hint">Subtracted from working days. The Cluster group ignores these.</span>
+        <div className="right" style={{ gap: 8 }}>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <button className="btn primary sm" disabled={!date} onClick={add}>+ Add holiday</button>
         </div>
-      )}
+      </div>
+      <div className="table-scroll">
+        <table>
+          <thead><tr><th>Date</th><th></th></tr></thead>
+          <tbody>
+            {ds.holidays.map((h) => (
+              <tr key={h}>
+                <td>{h}</td>
+                <td><button className="btn ghost sm" onClick={() => remove(h)}>Remove</button></td>
+              </tr>
+            ))}
+            {ds.holidays.length === 0 && <tr><td colSpan={2} className="empty">No holidays.</td></tr>}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
