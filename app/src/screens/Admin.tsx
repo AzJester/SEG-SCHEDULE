@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import type { Dataset } from '../types'
 import { buildEntities, type EntityConfig } from '../admin/entities'
 import { RecordDrawer, type Rec } from '../components/RecordDrawer'
+import { parseWorkbook } from '../import/workbook'
 
 export function Admin() {
   const { ds, update, resetDemo } = useStore()
@@ -20,6 +21,7 @@ export function Admin() {
         reports immediately. Roster hours are per-person; the committed scale and groups (incl. the
         Cluster no-holiday / liability rules) are fully configurable.
       </div>
+      <DataTools />
       <div className="tag-row" style={{ marginBottom: 16 }}>
         {entities.map((e) => (
           <button key={e.tab} className={`btn sm ${e.tab === tab ? 'primary' : ''}`} onClick={() => setTab(e.tab)}>{e.tab}</button>
@@ -113,6 +115,77 @@ function EntityTable({
             {rows.length === 0 && <tr><td colSpan={cfg.columns.length + 1} className="empty">No records yet.</td></tr>}
           </tbody>
         </table>
+      </div>
+    </div>
+  )
+}
+
+function DataTools() {
+  const { ds, update } = useStore()
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+
+  const onExcel = async (file: File) => {
+    setBusy(true); setMsg(null)
+    try {
+      const buf = await file.arrayBuffer()
+      const { dataset, summary } = await parseWorkbook(buf)
+      if (summary.bookings === 0) throw new Error('No bookings found. Is this the SEG-Schedule workbook?')
+      const ok = confirm(
+        `Import will REPLACE the current data with:\n\n` +
+        `• ${summary.bookings} bookings\n• ${summary.employees} employees\n• ${summary.programs} programs, ${summary.projects} projects, ${summary.tasks} tasks\n` +
+        `• ${summary.chargeCodes} charge codes\n• ${summary.holidays} holidays\n• ${summary.weeks} weeks from ${summary.horizonStart}\n\nProceed?`,
+      )
+      if (!ok) { setBusy(false); return }
+      update(dataset)
+      setMsg({ ok: true, text: `Imported ${summary.bookings} bookings and ${summary.employees} employees from the workbook.` })
+    } catch (e) {
+      setMsg({ ok: false, text: `Import failed: ${e instanceof Error ? e.message : String(e)}` })
+    }
+    setBusy(false)
+  }
+
+  const exportJson = () => {
+    const blob = new Blob([JSON.stringify(ds, null, 2)], { type: 'application/json' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `seg-schedule-${ds.asOf}.json`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  const onJson = async (file: File) => {
+    setBusy(true); setMsg(null)
+    try {
+      const parsed = JSON.parse(await file.text()) as Dataset
+      if (!Array.isArray(parsed.bookings) || !Array.isArray(parsed.employees)) throw new Error('Not a SEG dataset file.')
+      update(parsed)
+      setMsg({ ok: true, text: `Loaded ${parsed.bookings.length} bookings from JSON.` })
+    } catch (e) {
+      setMsg({ ok: false, text: `Load failed: ${e instanceof Error ? e.message : String(e)}` })
+    }
+    setBusy(false)
+  }
+
+  return (
+    <div className="panel" style={{ marginBottom: 20 }}>
+      <div className="panel-head">
+        <h2>Import / export</h2>
+        <span className="hint">Load the real SEG-Schedule.xlsx (parsed in your browser — nothing is uploaded) or back up / restore JSON.</span>
+      </div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', padding: '14px 18px', alignItems: 'center' }}>
+        <label className="btn primary sm" style={{ cursor: 'pointer' }}>
+          {busy ? 'Working…' : 'Import Excel (.xlsx)'}
+          <input type="file" accept=".xlsx" style={{ display: 'none' }} disabled={busy}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) onExcel(f); e.target.value = '' }} />
+        </label>
+        <button className="btn sm" onClick={exportJson}>Export JSON</button>
+        <label className="btn sm" style={{ cursor: 'pointer' }}>
+          Import JSON
+          <input type="file" accept=".json" style={{ display: 'none' }} disabled={busy}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) onJson(f); e.target.value = '' }} />
+        </label>
+        {msg && <span className={`pill ${msg.ok ? 'good' : 'bad'}`} style={{ marginLeft: 4 }}>{msg.text}</span>}
       </div>
     </div>
   )
