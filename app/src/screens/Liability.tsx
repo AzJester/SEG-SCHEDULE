@@ -4,6 +4,7 @@ import type { Filters } from '../types'
 import { EMPTY_FILTERS } from '../types'
 import { FilterBar } from '../components/FilterBar'
 import { applyFilters, buildLiability } from '../engine/aggregate'
+import { exportGrid } from '../export/excel'
 import { gapStyle, money0, n0 } from '../ui'
 
 const SPAN = 14
@@ -45,6 +46,10 @@ export function Liability() {
             <h2>Gap by person and week</h2>
             <span className="hint">Positive = unbooked hours. Negative = over-allocated.</span>
             <div className="right">
+              <button className="btn sm" onClick={() => exportGrid(`liability-${ds.asOf}.xlsx`, 'Liability', [
+                ['Employee', 'Group', 'Total gap', ...ctx.weeks.map((w) => w.label)],
+                ...rows.map((r) => [r.lastName, r.group, Math.round(r.totalGap), ...ctx.weeks.map((w) => Math.round(r.gap[w.index]))]),
+              ])}>Export Excel</button>
               <button className="btn sm" disabled={s === 0} onClick={() => setStart(Math.max(0, s - SPAN))}>← Earlier</button>
               <button className="btn sm" disabled={s >= maxStart} onClick={() => setStart(Math.min(maxStart, s + SPAN))}>Later →</button>
             </div>

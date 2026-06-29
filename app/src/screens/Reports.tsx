@@ -7,6 +7,7 @@ import { PivotTable } from '../components/PivotTable'
 import {
   REPORTS, applyFilters, buildProgramYear, buildReport, programYearLabels,
 } from '../engine/aggregate'
+import { exportGrid, pivotToGrid } from '../export/excel'
 
 export function Reports() {
   const { ds, ctx } = useStore()
@@ -54,6 +55,7 @@ export function Reports() {
             <h2>{def.name}</h2>
             <span className="hint">{def.describe}</span>
             <div className="right">
+              <button className="btn sm" onClick={() => exportGrid(`${def.id}-${ds.asOf}.xlsx`, def.name, pivotToGrid(rows, weeks, firstCol, measure))}>Export Excel</button>
               <span className="pill gray">{def.dims.join(' › ')}</span>
             </div>
           </div>
